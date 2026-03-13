@@ -1,4 +1,5 @@
 #include "audio_player_helper.h"
+#include <ctype.h>
 
 static const char *TAG = "aio_player";
 
@@ -16,6 +17,36 @@ static void _aio_task_exit_cb(int32_t code, void *user)
     handle->playing_type = PLAYER_IDLE;
 }
 
+static void _aio_meta_data_decode_down_cb(uint32_t bps, uint32_t ch, uint32_t sr, void *user)
+{
+    audio_player_aio_t *handle = (audio_player_aio_t *)user;
+    if (handle->_met_data_decode_down != NULL)
+    {
+        handle->_met_data_decode_down(bps, ch, sr);
+    }
+}
+
+int strncasecmp(const char *s1, const char *s2, size_t n)
+{
+    if (n == 0)
+        return 0;
+    for (size_t i = 0; i < n; i++)
+    {
+        unsigned char c1 = (unsigned char)s1[i];
+        unsigned char c2 = (unsigned char)s2[i];
+        int diff = tolower(c1) - tolower(c2);
+        if (diff != 0)
+        {
+            return diff;
+        }
+        if (c1 == '\0')
+        { // c2 must also be '\0' because diff==0
+            break;
+        }
+    }
+    return 0;
+}
+
 esp_err_t audio_player_aio_init(audio_player_aio_t *handle)
 {
     memset(handle, 0x00, sizeof(audio_player_aio_t));
@@ -28,6 +59,10 @@ esp_err_t audio_player_aio_init(audio_player_aio_t *handle)
     audio_player_flac_set_task_exit_event_cb(&handle->flac, _aio_task_exit_cb);
     audio_player_mp3_set_task_exit_event_cb(&handle->mp3, _aio_task_exit_cb);
 
+    audio_player_set_meta_down_cb(&handle->wav, _aio_meta_data_decode_down_cb);
+    audio_player_flac_set_meta_down_cb(&handle->flac, _aio_meta_data_decode_down_cb);
+    audio_player_mp3_set_meta_down_cb(&handle->mp3, _aio_meta_data_decode_down_cb);
+
     audio_player_set_user_data(&handle->wav, handle);
     audio_player_mp3_set_user_data(&handle->mp3, handle);
     audio_player_flac_set_user_data(&handle->flac, handle);
@@ -38,9 +73,12 @@ esp_err_t audio_player_aio_init(audio_player_aio_t *handle)
 
 esp_err_t audio_player_aio_play_file(audio_player_aio_t *handle, const char *file_dir)
 {
-    const char *tmp = file_dir;
     size_t len = strlen(file_dir);
     int i = 0;
+    esp_err_t ret = ESP_OK;
+
+    const char *tmp = file_dir;
+
     for (i = (len - 1); i >= 0; i--)
     {
         if (file_dir[i] == '.')
@@ -54,7 +92,6 @@ esp_err_t audio_player_aio_play_file(audio_player_aio_t *handle, const char *fil
         ESP_LOGE(TAG, "can not find \'.\',exit..");
         return ESP_ERR_INVALID_ARG;
     }
-
     ESP_LOGI(TAG, "file_ext_name : %s", (const char *)tmp);
 
     if (handle->wav.phy.i2s_inited == 1)
@@ -76,7 +113,7 @@ esp_err_t audio_player_aio_play_file(audio_player_aio_t *handle, const char *fil
         handle->mp3.phy.i2s_inited = 0;
     }
 
-    if (strncmp(tmp, ".wav", 4) == 0)
+    if (strncasecmp(tmp, ".wav", 4) == 0)
     {
         if (audio_player_play_wav_file(&handle->wav, file_dir) == ESP_OK)
         {
@@ -84,7 +121,7 @@ esp_err_t audio_player_aio_play_file(audio_player_aio_t *handle, const char *fil
             ESP_LOGI(TAG, "play wav");
         }
     }
-    else if (strncmp(tmp, ".flac", 5) == 0)
+    else if (strncasecmp(tmp, ".flac", 5) == 0)
     {
         if (audio_player_flac_play_file(&handle->flac, file_dir) == ESP_OK)
         {
@@ -92,7 +129,7 @@ esp_err_t audio_player_aio_play_file(audio_player_aio_t *handle, const char *fil
             ESP_LOGI(TAG, "play flac");
         }
     }
-    else if (strncmp(tmp, ".mp3", 4) == 0)
+    else if (strncasecmp(tmp, ".mp3", 4) == 0)
     {
         if (audio_player_mp3_play_file(&handle->mp3, file_dir) == ESP_OK)
         {
@@ -103,10 +140,10 @@ esp_err_t audio_player_aio_play_file(audio_player_aio_t *handle, const char *fil
     else
     {
         ESP_LOGE(TAG, "%s not support", (const char *)tmp);
-        return ESP_ERR_NOT_SUPPORTED;
+        ret = ESP_ERR_NOT_SUPPORTED;
     }
 
-    return ESP_OK;
+    return ret;
 }
 
 esp_err_t audio_player_aio_set_i2s_config(audio_player_aio_t *handle, audio_player_physical_handle_t phy)
@@ -376,6 +413,10 @@ uint8_t audio_player_aio_get_busy(audio_player_aio_t *handle)
 {
     return (handle->playing_type != PLAYER_IDLE);
 }
+uint8_t audio_player_aio_get_type(audio_player_aio_t *handle)
+{
+    return (handle->playing_type);
+}
 
 esp_err_t audio_player_aio_wait_task_exit(audio_player_aio_t *handle)
 {
@@ -396,6 +437,11 @@ esp_err_t audio_player_aio_wait_task_exit(audio_player_aio_t *handle)
 esp_err_t audio_player_aio_set_task_exit_event_cb(audio_player_aio_t *handle, void (*cb)(int32_t code))
 {
     handle->_playerTaskExit = cb;
+    return ESP_OK;
+}
+esp_err_t audio_player_aio_set_meta_data_decode_down_cb(audio_player_aio_t *handle, void (*cb)(uint32_t bps, uint32_t ch, uint32_t sr))
+{
+    handle->_met_data_decode_down = cb;
     return ESP_OK;
 }
 // eof
