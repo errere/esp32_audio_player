@@ -73,6 +73,11 @@ esp_err_t audio_player_aio_init(audio_player_aio_t *handle)
 
 esp_err_t audio_player_aio_play_file(audio_player_aio_t *handle, const char *file_dir)
 {
+    if (handle->playing_type != PLAYER_IDLE)
+    {
+        ESP_LOGE(TAG, "aio busy %d", (int)handle->playing_type);
+        return ESP_ERR_NOT_FINISHED;
+    }
     size_t len = strlen(file_dir);
     int i = 0;
     esp_err_t ret = ESP_OK;
